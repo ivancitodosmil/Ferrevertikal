@@ -123,6 +123,8 @@ funcionen al recargar la página: `vercel.json` (Vercel) y `netlify.toml` + `pub
 1. Sube la carpeta del proyecto a GitHub (sin `node_modules/`, `dist/` ni `.env`).
 2. En vercel.com → *Add New Project* → importa el repositorio. Framework: **Vite** (lo detecta solo).
 3. En *Environment Variables* agrega `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` (los mismos valores del `.env`).
+   Si conectas la integración oficial de Supabase en Vercel, sus variables `NEXT_PUBLIC_SUPABASE_URL` y
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY` también sirven: la web las lee si no están las `VITE_`.
 4. *Deploy*. Cada `git push` vuelve a publicar.
 
 Sin GitHub: `npx vercel --prod` desde la carpeta del proyecto (pide iniciar sesión la primera vez).
