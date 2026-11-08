@@ -7,7 +7,9 @@ Tienda/catálogo para ferretería hecho con **React + Vite**, animaciones con **
 
 ```
 ferrevertikal/
-├── supabase/setup.sql      ← ÚNICO script: pégalo en el SQL Editor de Supabase
+├── supabase/
+│   ├── setup.sql           ← base de datos: pégalo en el SQL Editor (se puede volver a ejecutar)
+│   └── datos-ejemplo.sql   ← opcional: categorías, productos y promoción de muestra
 ├── public/images/          ← logo y fotos de la ferretería
 ├── src/
 │   ├── pages/              ← Inicio, Catálogo, Producto, Promociones, Contacto, Cotización
@@ -26,9 +28,13 @@ ferrevertikal/
 1. Crea un proyecto en https://supabase.com/dashboard
 2. Abre **SQL Editor → New query**, pega el contenido de `supabase/setup.sql`.
 3. En la **sección 8** del script cambia el correo y la contraseña del superadmin.
-4. **Run**. Esto crea tablas, roles, políticas RLS, el bucket `product-images`,
-   el usuario superadmin y datos de ejemplo.
+4. **Run**. Esto crea tablas, roles, políticas RLS, el bucket `product-images`
+   y el usuario superadmin. Opcional: ejecuta también `supabase/datos-ejemplo.sql`
+   para ver el sitio con productos de muestra.
 5. Ve a **Project Settings → API** y copia la URL y la `anon key`.
+
+> **Actualizar la base de datos** cuando el proyecto cambie (por ejemplo, los descuentos por volumen):
+> vuelve a pegar y ejecutar `supabase/setup.sql` completo. Es idempotente: no toca tus productos ni tu configuración.
 
 ## 2. Ejecutar la web
 
@@ -50,6 +56,10 @@ Sin `.env` la web arranca en **modo demostración** con datos locales
 - **Promociones**: % o monto fijo; a todo el catálogo, una categoría o un producto.
   - *Margen mínimo*: solo entran los productos con ese margen o más.
   - *Margen a proteger*: el descuento se recorta para no bajar de ese margen.
+  - *Cantidad mínima* (descuento por volumen): el precio rebajado solo aplica cuando el cliente lleva esa
+    cantidad o más del mismo producto. El catálogo muestra "Desde N: $X c/u", el carrito lo aplica solo al
+    llegar a la cantidad y el pedido / mensaje de WhatsApp registran el precio cobrado.
+  - Debajo del valor del descuento se ve en vivo cuánto se rebaja por unidad y a qué precio y margen quedaría.
   - Vista previa en vivo de qué productos entran y a qué precio quedan.
 - **Cotizaciones**: lo que los clientes envían desde la web (y botón para responder por WhatsApp).
 - **Configuración**: WhatsApp, teléfono, dirección, horario, textos del inicio y roles de usuarios.
@@ -60,11 +70,14 @@ Para dar permisos a otra persona: que se registre (o créala en Authentication) 
 
 ## 4. Carrito, pedidos y pago con tarjeta
 
-- El cliente arma su **carrito** (`/carrito`), llena nombre, teléfono y forma de entrega y elige:
+- El cliente arma su **carrito** (`/carrito`) y elige cómo pedir:
   - **Pedir todo esto por WhatsApp** (un solo toque, sin formulario): se guarda el pedido (tabla `orders`,
     canal `whatsapp`) y se abre WhatsApp con el detalle completo (productos, cantidades, subtotal, IVA, total).
     El nombre de quien atiende ("Mónica") se cambia en Configuración → Datos de contacto.
   - El punto de entrega se guarda como `delivery_lat/lng` y el panel muestra un enlace a Google Maps para el chofer.
+  - **Pagar al recibir** (contraentrega): deja nombre, teléfono y cómo lo recibe (entrega en obra con punto en el
+    mapa, o retiro en bodega). El pedido queda como `nuevo` con canal `contraentrega` y la tienda lo llama para
+    confirmar. Se puede apagar en Panel → Configuración → Pagos.
   - **Pagar en línea y recibirlo en casa**: solo entrega a domicilio. El cliente marca el punto en el mapa
     (obligatorio), se guarda el pedido como `pendiente_pago` y se abre `/pago/<código>` con la
     *Cajita de Pagos* de PayPhone (Visa, Mastercard, Diners, saldo PayPhone). Hay un **pedido mínimo**
@@ -84,8 +97,9 @@ Para dar permisos a otra persona: que se registre (o créala en Authentication) 
    el token, así nadie puede marcar un pedido como pagado desde el navegador. Requiere la extensión `http`
    de Supabase (el script la activa; si no estuviera disponible, el pedido queda como **"pago por verificar"**
    y se revisa en PayPhone Business antes de despachar).
-5. Los precios del catálogo incluyen IVA; el porcentaje (15 % por defecto) se usa para desglosarlo en el
-   cobro y en el mensaje de WhatsApp.
+5. Los precios del catálogo son finales. El **IVA a desglosar** se configura en Panel → Configuración → Pagos:
+   con **0** (lo normal si no emites factura) el carrito, el pago y los mensajes muestran solo el total;
+   con 15 se desglosa subtotal + IVA en el cobro y en el mensaje de WhatsApp.
 
 ## 5. Fotos del sitio
 

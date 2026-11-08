@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAsync } from '../hooks/useAsync'
 import { adminListOrders, setOrderStatus, adminListMessages, setMessageStatus } from '../services/admin'
 import { money } from '../lib/pricing'
-import { ORDER_STATUS, DELIVERY, mapsLink } from '../lib/orders'
+import { ORDER_STATUS, DELIVERY, CHANNEL, mapsLink } from '../lib/orders'
 
 const CHIP = { nuevo: 'chip--naranja', pendiente_pago: '', pagado: 'chip--ok', pago_por_verificar: 'chip--naranja', pago_fallido: 'chip--no', en_preparacion: 'chip--naranja', entregado: 'chip--ok', cancelado: 'chip--no' }
 const FILTERS = [['todos', 'Todos'], ['nuevo', 'Nuevos'], ['pagado', 'Pagados'], ['pago_por_verificar', 'Por verificar'], ['en_preparacion', 'En preparación'], ['entregado', 'Entregados'], ['mensajes', 'Mensajes de contacto']]
@@ -38,7 +38,7 @@ export default function OrdersAdmin() {
           <div className="panel" key={o.id}>
             <div className="admin__head" style={{ marginBottom: 0 }}>
               <div>
-                <strong className="num">{o.code}</strong> <span className={`chip ${CHIP[o.status] || ''}`}>{ORDER_STATUS[o.status] || o.status}</span> <span className="chip">{o.channel === 'tarjeta' ? 'Tarjeta' : 'WhatsApp'}</span><br />
+                <strong className="num">{o.code}</strong> <span className={`chip ${CHIP[o.status] || ''}`}>{ORDER_STATUS[o.status] || o.status}</span> <span className="chip">{CHANNEL[o.channel] || o.channel}</span><br />
                 <strong>{o.customer_name}</strong> · {o.phone} {o.email && `· ${o.email}`}<br />
                 <small className="muted">{new Date(o.created_at).toLocaleString('es-EC')} · {DELIVERY[o.delivery]}{o.address ? `: ${o.address}` : ''}{o.delivery_lat != null && <> · <a href={mapsLink(o.delivery_lat, o.delivery_lng)} target="_blank" rel="noreferrer"><b>Ver punto de entrega en Google Maps</b></a></>}</small>
               </div>
@@ -54,9 +54,11 @@ export default function OrdersAdmin() {
               </p>
             )}
             <table className="tabla"><tbody>
-              {(o.items || []).map((i, n) => <tr key={n}><td>{i.qty} {i.unit}</td><td>{i.name}<br /><small className="muted">{i.sku}</small></td><td className="num">{money(i.price)}</td><td className="num">{money(i.qty * i.price)}</td></tr>)}
-              <tr><td colSpan="3" className="num" style={{ textAlign: 'right' }}>Subtotal</td><td className="num">{money(o.subtotal)}</td></tr>
-              <tr><td colSpan="3" className="num" style={{ textAlign: 'right' }}>IVA</td><td className="num">{money(o.tax)}</td></tr>
+              {(o.items || []).map((i, n) => <tr key={n}><td>{i.qty} {i.unit}</td><td>{i.name}<br /><small className="muted">{[i.sku, i.promotion].filter(Boolean).join(' · ')}</small></td><td className="num">{money(i.price)}</td><td className="num">{money(i.qty * i.price)}</td></tr>)}
+              {Number(o.tax) > 0 && (<>
+                <tr><td colSpan="3" className="num" style={{ textAlign: 'right' }}>Subtotal</td><td className="num">{money(o.subtotal)}</td></tr>
+                <tr><td colSpan="3" className="num" style={{ textAlign: 'right' }}>IVA</td><td className="num">{money(o.tax)}</td></tr>
+              </>)}
               <tr><td colSpan="3" style={{ textAlign: 'right' }}><strong>Total</strong></td><td className="num"><strong>{money(o.total)}</strong></td></tr>
             </tbody></table>
             <a className="btn btn--sm" style={{ justifySelf: 'start' }} href={`https://wa.me/${String(o.phone).replace(/\D/g, '').replace(/^0/, '593')}?text=${encodeURIComponent(`Hola ${o.customer_name}, te escribimos de Ferre Vertikal por tu pedido ${o.code}.`)}`} target="_blank" rel="noreferrer">Escribir por WhatsApp</a>

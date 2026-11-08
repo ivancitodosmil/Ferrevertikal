@@ -1,6 +1,7 @@
 import { money } from './pricing'
 
-/** IVA vigente en Ecuador (15 % desde abril de 2024). Se puede cambiar desde Configuración → Pagos. */
+/** IVA vigente en Ecuador (15 % desde abril de 2024). Se cambia desde Configuración → Pagos;
+ *  con 0 no se desglosa nada: los precios se tratan como finales (venta sin factura). */
 export const DEFAULT_IVA = 15
 
 /** Los precios del catálogo incluyen IVA: desglosa base imponible e impuesto en centavos. */
@@ -20,6 +21,9 @@ export function newOrderCode() {
 
 export const DELIVERY = { retiro: 'Retiro en bodega', entrega: 'Entrega en obra' }
 
+/** Canal por el que entró el pedido. */
+export const CHANNEL = { whatsapp: 'WhatsApp', tarjeta: 'Tarjeta', contraentrega: 'Pago al recibir' }
+
 export const ORDER_STATUS = {
   nuevo: 'Nuevo', pendiente_pago: 'Pendiente de pago', pagado: 'Pagado', pago_por_verificar: 'Pago por verificar',
   pago_fallido: 'Pago rechazado', en_preparacion: 'En preparación', entregado: 'Entregado', cancelado: 'Cancelado',
@@ -28,10 +32,11 @@ export const ORDER_STATUS = {
 /** Mensaje de WhatsApp con el detalle del pedido. */
 export function whatsappMessage(order, ivaPct = DEFAULT_IVA) {
   const b = breakdown(order.total, ivaPct)
-  const lines = order.items.map((i) => `• ${i.qty} ${i.unit} × ${i.name} — ${money(i.qty * i.price)}`)
+  const lines = order.items.map((i) => `• ${i.qty} ${i.unit} × ${i.name} — ${money(i.qty * i.price)}${i.promotion ? ` (${i.promotion}: ${money(i.price)} c/u)` : ''}`)
   const parts = [
     `Hola, quiero pedir estos productos (pedido ${order.code}):`, '', ...lines, '',
-    `Subtotal: ${money(b.base)}`, `IVA ${ivaPct} %: ${money(b.tax)}`, `*Total: ${money(b.total)}*`, '',
+    ...(ivaPct > 0 ? [`Subtotal: ${money(b.base)}`, `IVA ${ivaPct} %: ${money(b.tax)}`] : []),
+    `*Total: ${money(b.total)}*`, '',
   ]
   if (order.customer_name && order.customer_name !== 'Cliente por WhatsApp') parts.push(`Nombre: ${order.customer_name}`)
   if (order.phone) parts.push(`Teléfono: ${order.phone}`)

@@ -4,10 +4,10 @@ import { useState } from 'react'
 import { useAsync } from '../hooks/useAsync'
 import { useReveal } from '../hooks/useGsap'
 import { getProduct, listProducts } from '../services/catalog'
-import { money } from '../lib/pricing'
+import { money, plural, unitPriceFor } from '../lib/pricing'
 import { useCart } from '../hooks/useCart'
 import { useToast } from '../components/Toast'
-import { useSettings } from '../components/Layout'
+import { useSettings, useIva } from '../components/Layout'
 import ProductCard from '../components/ProductCard'
 import Icon from '../components/Icons'
 
@@ -21,14 +21,20 @@ export default function Product() {
   const { add } = useCart()
   const toast = useToast()
   const { contact = {} } = useSettings()
+  const ivaPct = useIva()
   const ref = useReveal([related.data])
 
   if (loading) return <p className="estado">Cargando…</p>
   if (error || !p) return <div className="wrap section"><div className="vacio"><h3>No encontramos este producto</h3><Link to="/catalogo" className="btn btn--sm">Volver al catálogo</Link></div></div>
 
   const imgs = p.images || []
+  const tiers = p.volume_tiers || []
+  const up = unitPriceFor(p, qty) // precio unitario según la cantidad elegida (aplica el precio por volumen si lo alcanza)
   const onAdd = () => { add(p, qty); toast(`${qty} × ${p.name} en tu carrito`) }
-  const waText = encodeURIComponent(`Hola, quiero pedir ${qty} ${p.unit}(s) de ${p.name} (${p.sku || ''}) a ${money(p.final_price)} c/u. ¿Tienen disponible?`)
+  const waText = encodeURIComponent(`Hola, quiero pedir ${qty} ${plural(p.unit, qty)} de ${p.name} (${p.sku || ''}) a ${money(up.unit_price)} c/u. ¿Tienen disponible?`)
+  const priceLabel = up.tier
+    ? ` · ${up.tier.promotion_name || 'Precio por volumen'} (desde ${up.tier.min_qty} ${plural(p.unit, up.tier.min_qty)})`
+    : p.promotion_name ? ` · ${p.promotion_name}` : ''
 
   return (
     <section className="section--tight" ref={ref}>
@@ -55,11 +61,25 @@ export default function Product() {
             {p.description && <p className="ficha__desc">{p.description}</p>}
             <div className="compra">
               <div className="precio num">
-                <span className="precio__final">{money(p.final_price)}</span>
-                {p.discount_pct > 0 && <span className="precio__antes">{money(p.price)}</span>}
-                <span className="precio__unidad">por {p.unit}, incluye IVA{p.promotion_name ? ` · ${p.promotion_name}` : ''}</span>
+                <span className="precio__final">{money(up.unit_price)}</span>
+                {up.unit_price < Number(p.price) && <span className="precio__antes">{money(p.price)}</span>}
+                <span className="precio__unidad">por {p.unit}{ivaPct > 0 ? ', incluye IVA' : ''}{priceLabel}</span>
               </div>
-              <span className={`stock ${p.stock > 0 ? 'stock--ok' : 'stock--no'}`}>{p.stock > 0 ? `En stock: ${p.stock} ${p.unit}${p.stock === 1 ? '' : 's'} disponibles` : 'Bajo pedido, consulta el tiempo de entrega'}</span>
+              {tiers.length > 0 && (
+                <div className="tiers">
+                  <strong>Precio por volumen</strong>
+                  <ul>
+                    {tiers.map((t) => (
+                      <li key={t.min_qty} className={up.tier?.min_qty === t.min_qty ? 'active' : ''}>
+                        <span>Desde {t.min_qty} {plural(p.unit, t.min_qty)}</span>
+                        <b className="num">{money(t.unit_price)} c/u</b>
+                      </li>
+                    ))}
+                  </ul>
+                  {up.next_tier && <small>Lleva {up.next_tier.min_qty - qty} más y pagas {money(up.next_tier.unit_price)} por {p.unit}.</small>}
+                </div>
+              )}
+              <span className={`stock ${p.stock > 0 ? 'stock--ok' : 'stock--no'}`}>{p.stock > 0 ? `En stock: ${p.stock} ${plural(p.unit, p.stock)} disponibles` : 'Bajo pedido, consulta el tiempo de entrega'}</span>
               <div className="compra__row">
                 <div className="cantidad" aria-label="Cantidad">
                   <button type="button" onClick={() => setQty((q) => Math.max(1, q - 1))} aria-label="Menos">−</button>
@@ -68,6 +88,7 @@ export default function Product() {
                 </div>
                 <button className="btn btn--lg" onClick={onAdd}><Icon name="plus" /> Agregar al carrito</button>
               </div>
+              {qty > 1 && <small className="muted num">Total por {qty} {plural(p.unit, qty)}: <b>{money(qty * up.unit_price)}</b></small>}
               <a className="btn btn--wa btn--block" href={`https://wa.me/${contact.whatsapp || ''}?text=${waText}`} target="_blank" rel="noreferrer">Pedir por WhatsApp</a>
               <div className="compra__nota">
                 <ul>

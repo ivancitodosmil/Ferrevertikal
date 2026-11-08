@@ -19,6 +19,7 @@ export default function Promotions() {
             {promos.data.map((pr) => (
               <div key={pr.id} className="aviso">
                 <strong>{pr.badge} {pr.name}.</strong>{pr.description ? ` ${pr.description}.` : ''}
+                {pr.min_qty > 1 ? ` Llevando ${pr.min_qty} o más del mismo producto.` : ''}
                 {pr.ends_at ? ` Hasta el ${new Date(pr.ends_at).toLocaleDateString('es-EC')}.` : ''}
               </div>
             ))}

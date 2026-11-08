@@ -31,8 +31,10 @@ function Resumen({ order, ivaPct }) {
         {order.items.map((i, n) => <li key={n}><span>{i.qty} {i.unit} × {i.name}</span><b className="num">{money(i.qty * i.price)}</b></li>)}
       </ul>
       <dl className="cot__desglose num">
-        <div><dt>Subtotal</dt><dd>{money(b.base)}</dd></div>
-        <div><dt>IVA {ivaPct} %</dt><dd>{money(b.tax)}</dd></div>
+        {ivaPct > 0 && (<>
+          <div><dt>Subtotal</dt><dd>{money(b.base)}</dd></div>
+          <div><dt>IVA {ivaPct} %</dt><dd>{money(b.tax)}</dd></div>
+        </>)}
         <div className="cot__tot"><dt>Total</dt><dd>{money(b.total)}</dd></div>
       </dl>
       <p className="muted">{order.customer_name} · {order.phone}<br />{DELIVERY[order.delivery]}{order.address ? `: ${order.address}` : ''}{order.delivery_lat != null && <> · <a href={mapsLink(order.delivery_lat, order.delivery_lng)} target="_blank" rel="noreferrer">punto en el mapa</a></>}</p>
@@ -63,7 +65,9 @@ export default function Pay() {
         token: payments.token,
         storeId: payments.store_id || undefined,
         clientTransactionId: order.code,
-        amount: b.totalCents, amountWithTax: b.baseCents, tax: b.taxCents,
+        amount: b.totalCents,
+        // con IVA: base gravada + impuesto; sin IVA (0): todo el monto va como no gravado
+        ...(b.taxCents > 0 ? { amountWithTax: b.baseCents, tax: b.taxCents } : { amountWithoutTax: b.totalCents }),
         currency: 'USD', lang: 'es', timeZone: -5, defaultMethod: 'card',
         reference: `Ferre Vertikal pedido ${order.code}`,
         phoneNumber: order.phone ? '+593' + String(order.phone).replace(/\D/g, '').replace(/^593/, '').replace(/^0/, '') : undefined,
@@ -83,7 +87,7 @@ export default function Pay() {
       <div className="titulo"><h2>Pagar con tarjeta</h2><p className="titulo__lead">Tus datos de tarjeta los procesa PayPhone, nosotros no los vemos ni guardamos.</p></div>
       <div className="pago">
         <div className="pago__caja">
-          {isDemo || !payments.token ? <DemoBox order={order} /> : (
+          {isDemo || !payments.token ? <DemoBox order={order} ivaPct={ivaPct} /> : (
             <>
               {state === 'loading' && <p className="estado">Cargando el formulario de pago…</p>}
               {state === 'error' && <p className="error">No se pudo cargar PayPhone. Revisa tu conexión o pide el pedido por WhatsApp.</p>}
@@ -99,11 +103,11 @@ export default function Pay() {
 }
 
 /** Simulación para el modo demostración (sin credenciales de PayPhone). */
-function DemoBox({ order }) {
+function DemoBox({ order, ivaPct }) {
   const [busy, setBusy] = useState(false)
   const [res, setRes] = useState(null)
   const pay = async () => { setBusy(true); const o = await confirmPayment(order.code, Date.now()); setRes(o); setBusy(false) }
-  if (res) return <PayResultView order={res} ivaPct={DEFAULT_IVA} inline />
+  if (res) return <PayResultView order={res} ivaPct={ivaPct} inline />
   return (
     <div className="pago__demo">
       <p className="aviso">Modo demostración: aquí aparece la cajita de PayPhone cuando se configure el token en el panel (Configuración → Pagos).</p>

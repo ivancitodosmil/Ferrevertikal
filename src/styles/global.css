@@ -632,3 +632,21 @@ a.ccard:hover { transform: translateY(-3px); box-shadow: var(--sombra); border-c
 .visita dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; margin: 0; font-size: 0.95rem; }
 .visita dt { color: var(--acero); } .visita dd { margin: 0; font-weight: 600; }
 @media (max-width: 860px) { .visita { grid-template-columns: 1fr; } }
+
+/* ---- Precio por volumen ---- */
+.precio__vol { font-size: 0.78rem; color: var(--naranja); font-weight: 600; width: 100%; }
+.tiers { display: grid; gap: 8px; padding: 14px 16px; border: 1px dashed color-mix(in srgb, var(--naranja) 50%, var(--linea)); border-radius: var(--radius-sm); background: var(--naranja-suave); font-size: 0.9rem; }
+.tiers ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.tiers li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; padding: 4px 8px; border-radius: 6px; }
+.tiers li.active { background: var(--superficie); font-weight: 700; }
+.tiers small { color: var(--acero); }
+.cot__tier { display: block; color: var(--naranja); font-weight: 600; font-size: 0.78rem; }
+.cot__next { display: block; color: var(--acero); font-size: 0.78rem; }
+/* mensaje bajo el valor del descuento en el panel */
+.campo small.hint { color: color-mix(in srgb, var(--naranja) 70%, var(--tinta)); font-weight: 600; line-height: 1.4; }
+
+/* ---- Carrito: cómo lo recibe (entrega / retiro) ---- */
+.opciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.opcion { display: flex; align-items: center; gap: 8px; flex: 1; padding: 10px 14px; border: 1.5px solid var(--linea); border-radius: var(--radius-sm); background: var(--superficie); font-weight: 600; font-size: 0.88rem; cursor: pointer; }
+.opcion.active { border-color: var(--naranja); background: var(--naranja-suave); }
+.campo .opcion input { width: auto; padding: 0; margin: 0; accent-color: var(--naranja); }

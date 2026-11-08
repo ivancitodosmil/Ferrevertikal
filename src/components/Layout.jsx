@@ -5,9 +5,12 @@ import { useAsync } from '../hooks/useAsync'
 import { getSettings } from '../services/catalog'
 import { WhatsAppIcon } from './Icons'
 import { createContext, useContext } from 'react'
+import { DEFAULT_IVA } from '../lib/orders'
 
 export const SettingsCtx = createContext({})
 export const useSettings = () => useContext(SettingsCtx)
+/** % de IVA a desglosar (Configuración → Pagos). 0 = los precios se muestran como finales, sin desglose. */
+export const useIva = () => { const { payments = {} } = useSettings(); return Number(payments.iva_pct ?? DEFAULT_IVA) }
 
 export default function Layout() {
   const { data } = useAsync(getSettings, [])

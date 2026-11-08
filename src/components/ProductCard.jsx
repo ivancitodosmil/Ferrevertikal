@@ -1,13 +1,16 @@
 import { Link } from 'react-router-dom'
-import { money } from '../lib/pricing'
+import { money, plural } from '../lib/pricing'
 import { useCart } from '../hooks/useCart'
 import Icon from './Icons'
 import { useToast } from './Toast'
+import { useIva } from './Layout'
 
 export default function ProductCard({ p }) {
   const { add } = useCart()
   const toast = useToast()
+  const ivaPct = useIva()
   const img = p.images?.[0]?.url
+  const tier = p.volume_tiers?.[0] // primer escalón de precio por volumen, si lo hay
   const onAdd = () => { add(p, 1); toast(`${p.name} agregado al carrito`) }
   return (
     <article className="card" data-reveal>
@@ -25,7 +28,8 @@ export default function ProductCard({ p }) {
         <div className="precio num">
           <span className="precio__final">{money(p.final_price)}</span>
           {p.discount_pct > 0 && <span className="precio__antes">{money(p.price)}</span>}
-          <span className="precio__unidad">por {p.unit}, incluye IVA</span>
+          <span className="precio__unidad">por {p.unit}{ivaPct > 0 ? ', incluye IVA' : ''}</span>
+          {tier && <span className="precio__vol">Desde {tier.min_qty} {plural(p.unit, tier.min_qty)}: {money(tier.unit_price)} c/u</span>}
         </div>
         <button className="card__add" onClick={onAdd}><Icon name="plus" /> Agregar al carrito</button>
       </div>

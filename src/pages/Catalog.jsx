@@ -44,7 +44,7 @@ export default function Catalog() {
         <nav className="migas" aria-label="Ruta"><Link to="/">Inicio</Link> / <Link to="/catalogo">Catálogo</Link>{current && <> / <span>{current.name}</span></>}</nav>
         <div className="titulo">
           <div className="titulo__row"><h2>{search ? `Resultados para “${search}”` : current ? current.name : 'Catálogo'}</h2></div>
-          <p className="titulo__lead">{current?.description ? `${current.description}. ` : ''}Precios por unidad de venta, con IVA. Agrega lo que necesites y te confirmamos stock y fecha de entrega.</p>
+          <p className="titulo__lead">{current?.description ? `${current.description}. ` : ''}Precios por unidad de venta. Agrega lo que necesites y te confirmamos stock y fecha de entrega.</p>
         </div>
         <div className="catalogo">
           <aside className="filtros">

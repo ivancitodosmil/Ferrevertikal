@@ -27,7 +27,8 @@ export const products = [
 ]
 
 export const promotions = [
-  { id: 'pr1', name: 'Semana del constructor', badge: '-10 %', description: 'Descuento en productos seleccionados', discount_type: 'percent', discount_value: 10, scope: 'all', category_id: null, product_id: null, min_margin_pct: 30, keep_margin_pct: 20, priority: 1, is_active: true, starts_at: '2024-01-01T00:00:00Z', ends_at: null },
+  { id: 'pr1', name: 'Semana del constructor', badge: '-10 %', description: 'Descuento en productos seleccionados', discount_type: 'percent', discount_value: 10, scope: 'all', category_id: null, product_id: null, min_margin_pct: 30, keep_margin_pct: 20, min_qty: 1, priority: 1, is_active: true, starts_at: '2024-01-01T00:00:00Z', ends_at: null },
+  { id: 'pr2', name: 'Precio por volumen en cemento', badge: 'Desde 20 sacos', description: 'Precio especial para obras grandes', discount_type: 'percent', discount_value: 5, scope: 'category', category_id: 'c1', product_id: null, min_margin_pct: null, keep_margin_pct: 10, min_qty: 20, priority: 0, is_active: true, starts_at: '2024-01-01T00:00:00Z', ends_at: null },
 ]
 
 export const settings = {
@@ -43,7 +44,7 @@ export const settings = {
   },
   payments: {
     // Pago con tarjeta mediante PayPhone (Ecuador). Se configura desde el panel → Configuración → Pagos.
-    enabled: false, provider: 'payphone', token: '', store_id: '', iva_pct: 15,
+    enabled: false, provider: 'payphone', token: '', store_id: '', iva_pct: 0, cod_enabled: true,
     min_delivery: 50, // monto mínimo (USD) para compra en línea con entrega a domicilio
   },
 }

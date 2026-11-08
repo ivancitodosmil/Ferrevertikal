@@ -45,9 +45,19 @@ export async function getProduct(slug) {
   return data
 }
 
+/** Productos del carrito por id (para refrescar precios y escalones por volumen). */
+export async function listProductsByIds(ids = []) {
+  if (!ids.length) return []
+  if (!supabase) return demoCatalog().filter((p) => ids.includes(p.id))
+  const { data, error } = await supabase.from('catalog_public').select('*').in('id', ids)
+  if (error) throw error
+  return data
+}
+
 export async function listPromotedProducts() {
   const rows = await listProducts()
-  return rows.filter((p) => p.discount_pct > 0)
+  // con descuento directo o con precio por volumen
+  return rows.filter((p) => p.discount_pct > 0 || (p.volume_tiers || []).length > 0)
 }
 
 export async function listActivePromotions() {

@@ -8,6 +8,8 @@
 --      ANTES de ejecutar (o ejecútalo y luego cámbiala desde Authentication).
 --
 --  El script es idempotente: puedes volver a ejecutarlo sin romper nada.
+--  Para ACTUALIZAR una base ya creada (p. ej. descuentos por volumen) basta con
+--  volver a ejecutarlo completo.
 --
 --  Qué crea:
 --   · Tablas: profiles, categories, products, product_images, promotions,
@@ -17,7 +19,7 @@
 --     escritura solo para admins)
 --   · Vistas públicas con el precio final ya calculado según promociones
 --     y margen (el costo nunca se expone al público)
---   · Usuario superadmin inicial + datos de ejemplo
+--   · Usuario superadmin inicial (los datos de ejemplo van aparte: datos-ejemplo.sql)
 -- =====================================================================
 
 create extension if not exists pgcrypto;
@@ -154,6 +156,8 @@ create index if not exists product_images_product_idx on public.product_images (
 --  min_margin_pct: solo aplica a productos cuyo margen sea >= este valor.
 --  keep_margin_pct: nunca dejar el margen por debajo de este valor
 --                   (el descuento se recorta si hace falta).
+--  min_qty: 1 = aplica siempre; > 1 = descuento por volumen, solo cuando el cliente
+--           lleva esa cantidad o más del mismo producto.
 create table if not exists public.promotions (
   id              uuid primary key default gen_random_uuid(),
   name            text not null,
@@ -166,6 +170,7 @@ create table if not exists public.promotions (
   product_id      uuid references public.products (id) on delete cascade,
   min_margin_pct  numeric(5,2),
   keep_margin_pct numeric(5,2),
+  min_qty         int not null default 1 check (min_qty >= 1),  -- descuento por volumen: aplica desde esta cantidad
   starts_at       timestamptz not null default now(),
   ends_at         timestamptz,
   is_active       boolean not null default true,
@@ -173,6 +178,11 @@ create table if not exists public.promotions (
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
+-- Bases creadas antes de los descuentos por volumen: agrega la columna si falta
+alter table public.promotions add column if not exists min_qty int not null default 1;
+do $$ begin
+  alter table public.promotions add constraint promotions_min_qty_check check (min_qty >= 1);
+exception when duplicate_object then null; end $$;
 
 create table if not exists public.site_settings (
   key         text primary key,
@@ -192,17 +202,20 @@ create table if not exists public.orders (
   delivery_lat   numeric(9,6),                         -- punto de entrega marcado en el mapa
   delivery_lng   numeric(9,6),
   notes          text,
-  items          jsonb not null default '[]'::jsonb,   -- [{id, name, sku, unit, qty, price}]
+  items          jsonb not null default '[]'::jsonb,   -- [{id, name, sku, unit, qty, price, list_price, promotion}] (price = precio unitario cobrado)
   subtotal       numeric(12,2) not null default 0,     -- base imponible
   tax            numeric(12,2) not null default 0,     -- IVA
   total          numeric(12,2) not null default 0,     -- total con IVA (lo que paga el cliente)
-  channel        text not null default 'whatsapp' check (channel in ('whatsapp', 'tarjeta')),
+  channel        text not null default 'whatsapp' check (channel in ('whatsapp', 'tarjeta', 'contraentrega')),
   status         text not null default 'nuevo' check (status in ('nuevo', 'pendiente_pago', 'pagado', 'pago_por_verificar', 'pago_fallido', 'en_preparacion', 'entregado', 'cancelado')),
   payment        jsonb,                                -- respuesta de PayPhone (transactionId, authorizationCode, cardBrand, lastDigits…)
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
 create index if not exists orders_status_idx on public.orders (status, created_at desc);
+-- Bases creadas antes del "pago al recibir": amplía los canales permitidos
+alter table public.orders drop constraint if exists orders_channel_check;
+alter table public.orders add constraint orders_channel_check check (channel in ('whatsapp', 'tarjeta', 'contraentrega'));
 
 -- Mensajes del formulario de contacto
 create table if not exists public.messages (
@@ -251,7 +264,7 @@ create trigger product_images_primary after insert or update on public.product_i
   for each row execute function public.single_primary_image();
 
 -- ---------------------------------------------------------------------
--- 4. Cálculo de precio final (promociones según margen)
+-- 4. Cálculo de precio final (promociones según margen y descuentos por volumen)
 -- ---------------------------------------------------------------------
 -- margen % = (precio - costo) / precio * 100
 create or replace function public.margin_pct(p_cost numeric, p_price numeric)
@@ -259,8 +272,9 @@ returns numeric language sql immutable as $$
   select case when p_price > 0 then round((p_price - p_cost) / p_price * 100, 2) else 0 end;
 $$;
 
--- Devuelve la mejor promoción aplicable y el precio final de un producto.
-create or replace function public.product_pricing(p_id uuid)
+-- Mejor promoción aplicable y precio final de un producto comprando p_qty unidades.
+-- Una promoción con min_qty > 1 (descuento por volumen) solo entra si p_qty >= min_qty.
+create or replace function public.product_pricing_qty(p_id uuid, p_qty int)
 returns table (
   promotion_id   uuid,
   promotion_name text,
@@ -272,6 +286,7 @@ returns table (
 language plpgsql stable security definer set search_path = public as $$
 declare
   v_cost   numeric; v_price numeric; v_cat uuid; v_margin numeric;
+  v_qty    int := greatest(1, coalesce(p_qty, 1));
   r        record;
   v_best   numeric := null; v_candidate numeric; v_floor numeric;
 begin
@@ -284,6 +299,7 @@ begin
     where pr.is_active
       and pr.starts_at <= now()
       and (pr.ends_at is null or pr.ends_at >= now())
+      and pr.min_qty <= v_qty
       and (pr.scope = 'all'
            or (pr.scope = 'category' and pr.category_id = v_cat)
            or (pr.scope = 'product'  and pr.product_id  = p_id))
@@ -312,7 +328,64 @@ begin
   return next;
 end $$;
 
+-- Precio unitario normal (comprando 1). Lo usan las vistas del catálogo.
+create or replace function public.product_pricing(p_id uuid)
+returns table (
+  promotion_id   uuid,
+  promotion_name text,
+  badge          text,
+  discount_type  text,
+  discount_value numeric,
+  final_price    numeric
+)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  return query select * from public.product_pricing_qty(p_id, 1);
+end $$;
+
+-- Escalones de precio por volumen de un producto, por ejemplo:
+--   [{"min_qty": 10, "unit_price": 8.17, "promotion_id": "...", "promotion_name": "...", "badge": "..."}]
+-- Solo se incluyen los escalones que mejoran el precio unitario y el del escalón anterior.
+create or replace function public.product_volume_tiers(p_id uuid)
+returns jsonb language sql stable security definer set search_path = public as $$
+  with base as (
+    select final_price from public.product_pricing_qty(p_id, 1)
+  ), prod as (
+    select id, category_id, cost, price from public.products where id = p_id
+  ), qtys as (
+    select distinct pr.min_qty
+    from public.promotions pr
+    cross join prod p
+    where pr.min_qty > 1
+      and pr.is_active
+      and pr.starts_at <= now()
+      and (pr.ends_at is null or pr.ends_at >= now())
+      and (pr.scope = 'all'
+           or (pr.scope = 'category' and pr.category_id = p.category_id)
+           or (pr.scope = 'product'  and pr.product_id  = p.id))
+      and (pr.min_margin_pct is null or public.margin_pct(p.cost, p.price) >= pr.min_margin_pct)
+  ), tiers as (
+    select q.min_qty, t.final_price, t.promotion_id, t.promotion_name, t.badge
+    from qtys q
+    cross join lateral public.product_pricing_qty(p_id, q.min_qty) t
+  ), ranked as (
+    select t.*,
+           min(t.final_price) over (order by t.min_qty rows between unbounded preceding and 1 preceding) as prev_best
+    from tiers t
+  )
+  select coalesce(
+    jsonb_agg(jsonb_build_object(
+      'min_qty', r.min_qty, 'unit_price', r.final_price,
+      'promotion_id', r.promotion_id, 'promotion_name', r.promotion_name, 'badge', r.badge
+    ) order by r.min_qty),
+    '[]'::jsonb)
+  from ranked r
+  cross join base b
+  where r.final_price < least(b.final_price, coalesce(r.prev_best, b.final_price));
+$$;
+
 -- Vista pública del catálogo (sin costo). Se consulta desde la web.
+-- volume_tiers: escalones de precio por cantidad (vacío si no hay descuentos por volumen).
 create or replace view public.catalog_public
 with (security_invoker = false) as
 select
@@ -329,7 +402,8 @@ select
   c.slug as category_slug,
   (select json_agg(json_build_object('id', i.id, 'url', i.url, 'alt', i.alt, 'is_primary', i.is_primary)
                    order by i.is_primary desc, i.sort_order)
-     from public.product_images i where i.product_id = p.id) as images
+     from public.product_images i where i.product_id = p.id) as images,
+  public.product_volume_tiers(p.id) as volume_tiers
 from public.products p
 left join public.categories c on c.id = p.category_id
 cross join lateral public.product_pricing(p.id) pr
@@ -346,7 +420,8 @@ select
   c.name as category_name,
   (select json_agg(json_build_object('id', i.id, 'url', i.url, 'path', i.path, 'alt', i.alt, 'is_primary', i.is_primary, 'sort_order', i.sort_order)
                    order by i.is_primary desc, i.sort_order)
-     from public.product_images i where i.product_id = p.id) as images
+     from public.product_images i where i.product_id = p.id) as images,
+  public.product_volume_tiers(p.id) as volume_tiers
 from public.products p
 left join public.categories c on c.id = p.category_id
 cross join lateral public.product_pricing(p.id) pr;
@@ -355,7 +430,7 @@ cross join lateral public.product_pricing(p.id) pr;
 create or replace view public.promotions_public
 with (security_invoker = false) as
 select id, name, badge, description, discount_type, discount_value, scope,
-       category_id, product_id, starts_at, ends_at
+       category_id, product_id, starts_at, ends_at, min_qty
 from public.promotions
 where is_active and starts_at <= now() and (ends_at is null or ends_at >= now());
 
@@ -549,99 +624,63 @@ insert into public.site_settings (key, value) values
       'provider', 'payphone',
       'token', '',
       'store_id', '',
-      'iva_pct', 15,
-      'min_delivery', 50          -- monto mínimo (USD) para pagar en línea con entrega a domicilio
+      'iva_pct', 0,              -- 0 = no se desglosa IVA (venta sin factura); 15 si facturas y quieres verlo desglosado
+      'min_delivery', 50,         -- monto mínimo (USD) para pagar en línea con entrega a domicilio
+      'cod_enabled', true         -- ofrecer "Pagar al recibir" (contraentrega) en el carrito
   ))
 on conflict (key) do nothing;
 
 -- ---------------------------------------------------------------------
 -- 8. SUPERADMIN INICIAL   <<< CAMBIA EL CORREO Y LA CONTRASEÑA >>>
 -- ---------------------------------------------------------------------
+-- Solo actúa la PRIMERA vez, cuando todavía no hay ningún superadmin. Si ya existe uno,
+-- no crea nada: puedes volver a ejecutar el script sin que toque tu usuario ni tu contraseña.
+-- Para cambiar la contraseña después: Supabase → Authentication → Users.
 do $$
 declare
-  v_email    text := 'admin@ferrevertikal.com';   -- <<< cambia esto
+  v_email    text := 'admin@ferrevertikal.com';   -- <<< cambia esto (solo la primera vez)
   v_password text := 'CambiaEstaClave123!';       -- <<< y esto
   v_id       uuid;
 begin
-  select id into v_id from auth.users where email = v_email;
-  if v_id is null then
-    v_id := gen_random_uuid();
-    insert into auth.users (
-      instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
-      raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
-      confirmation_token, recovery_token, email_change, email_change_token_new
-    ) values (
-      '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
-      v_email, crypt(v_password, gen_salt('bf')), now(),
-      '{"provider":"email","providers":["email"]}'::jsonb,
-      '{"full_name":"Super Admin"}'::jsonb, now(), now(), '', '', '', ''
-    );
-    insert into auth.identities (
-      id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at
-    ) values (
-      gen_random_uuid(), v_id, v_id::text,
-      jsonb_build_object('sub', v_id::text, 'email', v_email, 'email_verified', true),
-      'email', now(), now(), now()
-    );
+  if not exists (select 1 from public.profiles where role = 'superadmin') then
+    select id into v_id from auth.users where email = v_email;
+    if v_id is null then
+      v_id := gen_random_uuid();
+      insert into auth.users (
+        instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+        raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+        confirmation_token, recovery_token, email_change, email_change_token_new
+      ) values (
+        '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+        v_email, crypt(v_password, gen_salt('bf')), now(),
+        '{"provider":"email","providers":["email"]}'::jsonb,
+        '{"full_name":"Super Admin"}'::jsonb, now(), now(), '', '', '', ''
+      );
+      insert into auth.identities (
+        id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+      ) values (
+        gen_random_uuid(), v_id, v_id::text,
+        jsonb_build_object('sub', v_id::text, 'email', v_email, 'email_verified', true),
+        'email', now(), now(), now()
+      );
+    end if;
+    insert into public.profiles (id, email, full_name, role)
+    values (v_id, v_email, 'Super Admin', 'superadmin')
+    on conflict (id) do update set role = 'superadmin', email = excluded.email;
+  else
+    raise notice 'Ya existe un superadmin: no se crea otro.';
   end if;
-  insert into public.profiles (id, email, full_name, role)
-  values (v_id, v_email, 'Super Admin', 'superadmin')
-  on conflict (id) do update set role = 'superadmin', email = excluded.email;
 end $$;
 
 -- Para dar permisos de admin a otra cuenta que ya se registró:
 --   select public.set_user_role('otro@correo.com', 'admin');
 
 -- ---------------------------------------------------------------------
--- 9. Datos de ejemplo (puedes borrarlos desde el panel)
+-- 9. Datos de ejemplo
 -- ---------------------------------------------------------------------
-insert into public.categories (name, slug, icon, sort_order, description) values
-  ('Cemento',             'cemento',             'cemento',       1, 'Cemento, morteros y aditivos'),
-  ('Hierro',              'hierro',              'hierro',        2, 'Varillas, mallas, perfiles y alambre'),
-  ('Herramientas',        'herramientas',        'herramientas',  3, 'Manuales y eléctricas'),
-  ('Materiales para obra','materiales-para-obra','materiales',    4, 'Bloques, arena, ripio, tubería'),
-  ('Pinturas',            'pinturas',            'pinturas',      5, 'Pinturas, lacas, brochas y rodillos'),
-  ('Eléctricos',          'electricos',          'electricos',    6, 'Cables, breakers, tomas e iluminación'),
-  ('Plomería y sanitarios','plomeria-sanitarios','plomeria',      7, 'Tubería PVC, griferías, inodoros y lavamanos'),
-  ('Cubiertas',           'cubiertas',           'cubiertas',     8, 'Tejas PVC, planchas de zinc y policarbonato')
-on conflict (slug) do nothing;
-
-insert into public.products (category_id, name, slug, sku, brand, description, unit, cost, price, stock, is_featured) values
-  ((select id from public.categories where slug='cubiertas'),   'Plancha tipo teja PVC 3.0 m',       'plancha-teja-pvc-3m',     'CUB-001', 'Techolit',  'Plancha termoacústica tipo teja colonial, color terracota. Liviana, no se oxida y aísla el calor.', 'plancha', 18.50, 26.90, 120, true),
-  ((select id from public.categories where slug='hierro'),      'Varilla corrugada 12 mm x 12 m',     'varilla-corrugada-12mm',  'HIE-012', 'Adelca',    'Acero de refuerzo grado 42 para columnas y vigas.', 'varilla', 11.20, 14.40, 400, true),
-  ((select id from public.categories where slug='hierro'),      'Malla electrosoldada 15x15 6 mm',    'malla-electrosoldada-6mm','HIE-020', 'Adelca',    'Panel de 2.40 x 6.25 m para losas y contrapisos.', 'panel', 52.00, 64.90, 35, false),
-  ((select id from public.categories where slug='cemento'),     'Cemento Portland tipo GU 50 kg',     'cemento-portland-50kg',   'CEM-050', null,    'Saco de 50 kg para uso general en obra.', 'saco', 7.10, 8.60, 600, true),
-  ((select id from public.categories where slug='electricos'),  'Breaker termomagnético 1P 20 A',     'breaker-1p-20a',          'ELE-120', 'Siemens',   'Protección para circuitos residenciales, montaje en riel.', 'unidad', 3.40, 5.90, 90, true),
-  ((select id from public.categories where slug='herramientas'),'Cerradura de pomo acero inoxidable', 'cerradura-pomo-inox',     'HER-310', 'Orso',      'Cerradura de pomo con llave para puertas interiores y de baño.', 'unidad', 6.80, 11.50, 48, false),
-  ((select id from public.categories where slug='plomeria-sanitarios'),'Tanque de agua 1 100 L',       'tanque-agua-1100l',       'PLO-110', 'Plastigama','Tanque de polietileno con tapa, apto para agua potable.', 'unidad', 98.00, 129.00, 14, true),
-  ((select id from public.categories where slug='plomeria-sanitarios'),'Inodoro one piece blanco',     'inodoro-one-piece',       'PLO-200', 'Edesa',     'Inodoro de una pieza, descarga doble, incluye asiento.', 'unidad', 78.00, 119.00, 9, false),
-  ((select id from public.categories where slug='pinturas'),    'Pintura látex interior 1 galón',     'pintura-latex-galon',     'PIN-001', 'Cóndor',    'Pintura lavable para interiores, acabado mate. Colores a pedido.', 'galón', 12.30, 17.90, 70, false),
-  ((select id from public.categories where slug='materiales-para-obra'),'Tubo PVC desagüe 110 mm x 3 m','tubo-pvc-110mm',          'MAT-110', 'Plastigama','Tubería sanitaria de PVC para desagües.', 'tubo', 8.90, 12.40, 150, false)
-on conflict (slug) do nothing;
-
--- Promoción de ejemplo: 10 % en todo lo que tenga margen >= 30 %, sin bajar del 20 %
-insert into public.promotions (name, badge, description, discount_type, discount_value, scope, min_margin_pct, keep_margin_pct, priority)
-select 'Semana del constructor', '-10 %', 'Descuento en productos seleccionados', 'percent', 10, 'all', 30, 20, 1
-where not exists (select 1 from public.promotions where name = 'Semana del constructor');
-
--- Imágenes de ejemplo para los productos de muestra (puedes reemplazarlas desde el panel).
--- Apuntan a las fotos que vienen dentro del proyecto web (/images/...).
-insert into public.product_images (product_id, url, alt, is_primary)
-select p.id, v.url, p.name, true
-from (values
-  ('plancha-teja-pvc-3m',      '/images/teja-pvc.jpg'),
-  ('varilla-corrugada-12mm',   '/images/bodega-hierro.jpg'),
-  ('malla-electrosoldada-6mm', '/images/camion-varillas.jpg'),
-  ('cemento-portland-50kg',    '/images/bodega-frente.jpg'),
-  ('breaker-1p-20a',           '/images/breaker.jpg'),
-  ('cerradura-pomo-inox',      '/images/cerradura.jpg'),
-  ('tanque-agua-1100l',        '/images/bodega-tanques.jpg'),
-  ('inodoro-one-piece',        '/images/sanitarios.jpg'),
-  ('pintura-latex-galon',      '/images/pasillo-pinturas.jpg'),
-  ('tubo-pvc-110mm',           '/images/bodega-pvc.jpg')
-) as v(slug, url)
-join public.products p on p.slug = v.slug
-where not exists (select 1 from public.product_images i where i.product_id = p.id);
+-- Ya no van en este script, para poder volver a ejecutarlo en una base en uso sin que
+-- reaparezcan. Si quieres ver el sitio con categorías, productos y una promoción de
+-- muestra en una base nueva, ejecuta aparte supabase/datos-ejemplo.sql.
 
 -- Listo. Verifica con:
 --   select * from public.catalog_public;

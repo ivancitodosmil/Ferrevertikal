@@ -154,7 +154,7 @@ function Featured({ products }) {
       <div className="wrap">
         <div className="titulo">
           <div className="titulo__row" data-reveal><h2>Los más pedidos</h2><Link to="/catalogo" className="link">Ver catálogo completo</Link></div>
-          <p className="titulo__lead" data-reveal>Lo que más piden maestros y constructores esta semana. Precios por unidad de venta, con IVA.</p>
+          <p className="titulo__lead" data-reveal>Lo que más piden maestros y constructores esta semana. Precios por unidad de venta.</p>
         </div>
         <div className="grid grid--4">
           {(products || []).map((p) => <ProductCard key={p.id} p={p} />)}

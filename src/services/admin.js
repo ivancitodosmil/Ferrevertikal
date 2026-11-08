@@ -138,6 +138,7 @@ export async function savePromotion(values) {
     name: values.name, badge: values.badge || null, description: values.description || null,
     discount_type: values.discount_type, discount_value: Number(values.discount_value || 0),
     scope: values.scope,
+    min_qty: Math.max(1, Math.floor(Number(values.min_qty) || 1)),
     category_id: values.scope === 'category' ? values.category_id || null : null,
     product_id: values.scope === 'product' ? values.product_id || null : null,
     min_margin_pct: values.min_margin_pct === '' || values.min_margin_pct == null ? null : Number(values.min_margin_pct),
@@ -152,7 +153,11 @@ export async function savePromotion(values) {
   }
   const q = values.id ? supabase.from('promotions').update(row).eq('id', values.id) : supabase.from('promotions').insert(row)
   const { data, error } = await q.select().single()
-  if (error) throw error
+  if (error) {
+    // Base de datos sin actualizar (falta la columna min_qty): guiar al administrador
+    if (error.code === "PGRST204" || /min_qty/.test(error.message || "")) throw new Error("La base de datos todavía no tiene el campo de cantidad mínima. Ejecuta supabase/setup.sql completo en el SQL Editor de Supabase y vuelve a guardar.")
+    throw error
+  }
   return data
 }
 export async function deletePromotion(id) {
